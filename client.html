@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link rel="stylesheet" type="text/css" href="http://ec2-54-161-19-75.compute-1.amazonaws.com/~Mustafa0Tahir/client.css">
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js" type="text/javascript"></script>
+    <script>
+        $(document).ready(function () {
+            const url = "http://ec2-54-161-19-75.compute-1.amazonaws.com/~Mustafa0Tahir/commonFunctions.php"
+            const socketio = io.connect();
+            let user;
+            let currentLobby;
+            let isAdmin = false;
+
+            isLoggedIn();
+
+            $("#createUser").click(function () {
+                createUser();
+            });
+
+            $("#login").click(function () {
+                login();
+            });
+
+            $("#send").click(function () {
+                sendMessage();
+            });
+
+            $("#logout").click(function () {
+                logout();
+            });
+
+            $("#makeRoom").click(function () {
+                $("#roomForm").toggle();
+            });
+
+            $("#createRoom").click(function () {
+                if ($("#roomName").val().trim() == "") {
+                    $("#invalid").text("Please fill in all fields before submitting.");
+                    return;
+                } else {
+                    makeRoom($("#roomName").val().trim(), $("#roomPassword").val().trim());
+                }
+            });
+
+            $("#leave").click(function () {
+                leaveRoom();
+            });
+
+            $("#hasPassButton").click(function () {
+                validatePassword();
+            })
+
+            function getRooms() {
+                const data = { 'username': user, 'rooms': true };
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success && postRooms(data.rooms))
+                    .catch(err => console.error(err));
+            }
+
+            function postRooms(rooms) {
+                $("#joinRooms").empty();
+                for (let room of rooms) {
+                    const button = document.createElement("button");
+                    button.textContent = room.name;
+                    button.id = room.name;
+                    document.getElementById("joinRooms").appendChild(button);
+                    button.addEventListener("click", () => {
+                        joinRoom(room.name);
+                    });
+                }
+            }
+
+            function joinRoom(room) {
+                socketio.emit("join_room", room);
+                currentLobby = room;
+                localStorage.setItem("lastRoom", room);
+                checkAdmin(room).then(adminStatus => {
+                    isAdmin = adminStatus;
+                    if (isAdmin) {
+                        $(".admin-controls").show();
+                    } else {
+                        $(".admin-controls").hide();
+                    }
+                });
+                leaveJoinToggle(true);
+                $("#currentRoom").text(currentLobby);
+            }
+
+            function leaveRoom() {
+                socketio.emit("leave_room", currentLobby);
+                currentLobby = "main";
+                localStorage.setItem("lastRoom", "main");
+                $("#checkPass").hide();
+                $("#incorrect").val("");
+                $("#chat").show();
+                isAdmin = false;
+                $(".admin-controls").hide();
+                leaveJoinToggle(false);
+                $("#currentRoom").text(currentLobby);
+                getRooms();
+            }
+
+            function checkAdmin(room) {
+                const data = { 'username': user, 'room': room, 'admin': true };
+                return fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        return data.success;
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        return false;
+                    });
+            }
+
+            function leaveJoinToggle(question) {
+                $("#logoutDiv").toggle();
+                $("#joinRooms").toggle();
+                $("#makeRoom").toggle();
+                $("#chatlog").empty();
+                $("#leave").toggle();
+                if (question) {
+                    hasPassword().then(success => {
+                        if (success) {
+                            $("#checkPass").toggle();
+                            $("#chat").toggle();
+                        } else {
+                            getMessages();
+                        }
+                    }).catch(err => {
+                        console.error("Error checking password:", err);
+                        getMessages();
+                    });
+                } else {
+                    getMessages();
+                }
+            }
+
+            function hasPassword() {
+                const data = { 'room': currentLobby, 'hasPassword': true };
+                return fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success)
+                    .catch(err => {
+                        console.error(err);
+                        return false;
+                    });
+            }
+
+            function validatePassword() {
+                const data = { 'room': currentLobby, 'password': $("#hasPass").val().trim(), 'checkPassword': true };
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success ? clearPass() : $("#incorrect").text("incorrect password"))
+                    .catch(err => console.error(err));
+            }
+
+            function clearPass() {
+                $("#checkPass").hide();
+                $("#incorrect").val("");
+                $("#chat").show();
+                $("#hasPass").val("");
+                getMessages();
+            }
+
+            function makeRoom(name, password) {
+                const data = { 'username': user, 'password': password, 'room': name, 'makeRoom': true };
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success && resetForm())
+                    .catch(err => console.error(err));
+            }
+
+            function resetForm() {
+                $("#roomName").val("");
+                $("#roomPassword").val("");
+                $("#invalid").val("");
+                $("#roomForm").toggle();
+                $("#joinRooms").empty();
+                getRooms();
+            }
+
+            function getMessages() {
+                const data = { 'room': currentLobby, 'get': true };
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success && postMessages(data.messages))
+                    .catch(err => console.error(err));
+            }
+
+            function postMessages(messages) {
+                for (let message of messages) {
+                    document.getElementById("chatlog").appendChild(document.createElement("hr"));
+                    document.getElementById("chatlog").appendChild(document.createTextNode(message.message));
+                }
+            }
+
+            function sendMessage() {
+                const rn = new Date();
+                const format = (rn.getMonth() + 1).toString().padStart(2, '0') + "-" +
+                    rn.getDate().toString().padStart(2, '0') + "-" +
+                    rn.getFullYear() + " " +
+                    rn.getHours().toString().padStart(2, '0') + ":" +
+                    rn.getMinutes().toString().padStart(2, '0');
+                const msg = user + " @ " + format + ": " + document.getElementById("message_input").value;
+                $("#message_input").val("");
+                pushMessage(msg);
+                socketio.emit("message_to_server", { message: msg });
+            }
+
+            socketio.on("message_to_client", function (data) {
+                //Append an HR thematic break and the escaped HTML of the new message
+                document.getElementById("chatlog").appendChild(document.createElement("hr"));
+                document.getElementById("chatlog").appendChild(document.createTextNode(data['message']));
+            });
+
+            socketio.on("private_message", function (data) {
+                const privateMsg = `[Private] ${data.sender} to you: ${data.message}`;
+                // const messageElement = document.createElement("hr");
+                // messageElement.style.color = "blue";  // Style private messages differently
+                // messageElement.textContent = privateMsg;
+                // document.getElementById("chatlog").appendChild(messageElement);
+                document.getElementById("chatlog").appendChild(document.createElement("hr"));
+                document.getElementById("chatlog").appendChild(document.createTextNode(privateMsg));
+            });
+
+            socketio.on("update_user_list", function (users) {
+                $("#userList").empty();
+                users.forEach(username => {
+                    let buttons = "";
+
+                    if (username !== user) {  // Only show buttons for other users
+                        buttons = `
+                            <button class="message-btn" data-user="${username}">Message</button>
+                            <div class="admin-controls" style="display: ${isAdmin ? 'block' : 'none'};">
+                                <button class="kick-btn" data-user="${username}">Kick</button>
+                                <button class="ban-btn" data-user="${username}">Ban</button>
+                            </div>
+                        `;
+                    }
+
+                    $("#userList").append(`
+                        <li class="user">
+                            ${username}
+                            ${buttons}
+                        </li>
+                    `);
+                });
+
+                // Add event listener to message buttons
+                $(".message-btn").click(function () {
+                    const recipient = $(this).data("user");
+                    const msg = prompt("Enter your private message to " + recipient + ":");
+                    const privateMsg = `[Private] You to ${recipient}: ${msg}`;
+                    document.getElementById("chatlog").appendChild(document.createElement("hr"));
+                    document.getElementById("chatlog").appendChild(document.createTextNode(privateMsg));
+                    if (msg) {
+                        socketio.emit("private_message", { recipient, message: msg });
+                    }
+                });
+
+                // Add event listener for kick buttons
+                $(".kick-btn").click(function () {
+                    const kickedUser = $(this).data("user");
+                    socketio.emit("kick_user", { user: kickedUser, room: currentLobby });
+                });
+                $(".ban-btn").click(function () {
+                    const banUser = $(this).data("user");
+                    ban(banUser);
+                    socketio.emit("kick_user", { user: banUser, room: currentLobby });
+                });
+            });
+
+            socketio.on("kicked", function (data) {
+                alert("You have been kicked from the room.");
+                leaveRoom();
+            });
+
+            function ban(user) {
+                const data = { 'username': user, 'room': currentLobby, 'ban': true };
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success)
+                    .catch(err => console.error(err));
+            }
+
+            function pushMessage(msg) {
+                const data = { 'username': user, 'room': currentLobby, 'message': msg, 'push': true };
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success)
+                    .catch(err => console.error(err));
+            }
+
+            function logout(event) {
+                const data = { 'logout': true };
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success ? onLogout() : console.log("Unable to logout"))
+                    .catch(err => console.error(err));
+            }
+
+            function login(event) {
+                const username = $("#username").val();
+                const password = $("#password").val();
+
+                const data = { 'username': username, 'password': password, 'login': true };
+
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success ? onLogin(username) : console.log(`${data.message}`))
+                    .catch(err => console.error(err));
+            }
+
+            function createUser(event) {
+                const username = $("#createUsername").val();
+                const password = $("#createPassword").val();
+
+                const data = { 'createUser': username, 'createPass': password, 'create': true };
+
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => console.log(data.success ? onLogin(username) : `Account not created: ${data.message}`))
+                    .catch(err => console.error(err));
+            }
+
+            function isLoggedIn() {
+                const data = { 'checkLogin': true };
+                fetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    credentials: "include",
+                    headers: { 'content-type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(data => data.success && onLogin(data.username))
+                    .catch(err => console.error(err));
+            }
+
+            function onLogin(username) {
+                $("#in").toggle();
+                $("#afterlogin").toggle();
+                user = username;
+                currentLobby = "main";
+                socketio.emit("set_username", username);
+                getRooms();
+                const lastRoom = localStorage.getItem("lastRoom");
+                currentLobby = lastRoom;
+                if (lastRoom != "main") {
+                    joinRoom(lastRoom);
+                } else {
+                    getMessages();
+                }
+                $("#currentRoom").text(currentLobby);
+            }
+
+            function onLogout() {
+                $("#in").toggle();
+                $("#afterlogin").toggle();
+                $("#chatlog").empty();
+                $("#joinRooms").empty();
+                user = "";
+                currentLobby = "";
+                //YOU GOTTA UPDATE THE LIST WHEN YOU LOGOUT ?? DISCONNECT??
+            }
+        })
+    </script>
+</head>
+
+<body>
+    <!-- Login and account creation sections -->
+    <div id="in">
+        <!-- Login form -->
+        <div id="loginDiv">
+            <label for="username">Username:</label>
+            <input type="text" name="username" id="username" required>
+            <label for="password">Password:</label>
+            <input type="password" name="password" id="password" required>
+            <button id="login">Login</button>
+        </div>
+
+        <!-- Account creation form -->
+        <div id="createDiv">
+            <label for="username">Username:</label>
+            <input type="text" name="createUsername" id="createUsername" required>
+            <label for="password">Password:</label>
+            <input type="password" name="createPassword" id="createPassword" required>
+            <button id="createUser">Create Account</button>
+        </div>
+    </div>
+
+    <div id="afterlogin" hidden>
+        <div id="currentRoom"></div>
+        <div id="usersInRoom">
+            <h3>Users in Room:</h3>
+            <ul id="userList"></ul>
+        </div>
+        <div id="chatrooms">
+            <div id="joinRooms"></div>
+            <button id="leave" hidden>Leave Room</button>
+            <button id="makeRoom">make room</button>
+            <div id="roomForm" hidden>
+                <label for="roomName">Room name:</label><br>
+                <input type="text" placeholder="Room Name" id="roomName" required><br>
+
+                <label for="roomPassword">Password (optional):</label><br>
+                <input id="roomPassword" placeholder="Password" type="password"><br>
+
+                <p id="invalid"></p>
+
+                <button id="createRoom">Create</button>
+            </div>
+            <div id="checkPass" hidden>
+                <input type="text" id="hasPass">
+                <button id="hasPassButton">Validate</button>
+                <p id="incorrect"></p>
+            </div>
+        </div>
+        <div id="logoutDiv">
+            <button id="logout">Logout</button>
+        </div>
+        <div id="chat">
+            <div id="chatlog"></div>
+            <input type="text" id="message_input">
+            <button id="send">send</button>
+        </div>
+    </div>
+</body>
+
+</html>
