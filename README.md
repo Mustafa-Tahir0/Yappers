@@ -711,6 +711,7 @@ This project is open source and available under the [MIT License](LICENSE).
 - GitHub: [@Mustafa-Tahir0](https://github.com/Mustafa-Tahir0)
 - LinkedIn: [Mustafa Tahir](https://www.linkedin.com/in/mustafatahir09)
 - Email: mustafa.tahir0427@gmail.com
+- Portfolio: [Live Site](https://mustafatahir.vercel.app)
 
 ## 🙏 Acknowledgments
 
